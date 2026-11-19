@@ -355,7 +355,8 @@ static const struct snd_soc_dapm_route mt6768_mt6358_dapm_routes[] = {
 	{"AIN0", NULL, "Internal Mic"},
 	{"AIN1", NULL, "Headset Mic"},
 	{"AIN2", NULL, "Internal Mic"},
-	{"Speaker", NULL, "SPK"},
+	{"Speaker", NULL, "Headphone L"},
+	{"Speaker", NULL, "Headphone R"},
 };
 
 static struct snd_soc_card mt6768_mt6358_card = {
@@ -440,6 +441,12 @@ static int mt6768_mt6358_dev_probe(struct platform_device *pdev)
 	}
 
 	snd_soc_card_set_drvdata(card, priv);
+
+	card->aux_dev = NULL;
+	card->num_aux_devs = 0;
+	ret = snd_soc_of_parse_aux_devs(card, "audio-aux-devs");
+	if (ret)
+		goto out_codec;
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 

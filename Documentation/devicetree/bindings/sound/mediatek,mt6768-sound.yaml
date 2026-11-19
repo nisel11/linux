@@ -27,6 +27,10 @@ properties:
     $ref: /schemas/types.yaml#/definitions/phandle
     description: Phandle to the external speaker codec node.
 
+  audio-aux-devs:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    description: Auxiliary audio components without a DAI.
+
 required:
   - compatible
   - mediatek,platform
