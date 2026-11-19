@@ -16,23 +16,71 @@
 #include "mt6768-afe-common.h"
 #include "../common/mtk-afe-platform-driver.h"
 #include "../../codecs/mt6358.h"
+#include "../../codecs/mt6358-accdet.h"
 
 struct mt6768_mt6358_priv {
 	struct snd_soc_jack headset_jack;
 };
 
+static struct snd_soc_jack_pin mt6768_headset_jack_pins[] = {
+	{
+		.pin = "Headphone",
+		.mask = SND_JACK_HEADPHONE,
+	},
+	{
+		.pin = "Headset Mic",
+		.mask = SND_JACK_MICROPHONE,
+	},
+};
+
 static int mt6768_mt6358_codec_init(struct snd_soc_pcm_runtime *rtd)
 {
+	struct mt6768_mt6358_priv *priv = snd_soc_card_get_drvdata(rtd->card);
 	struct snd_soc_component *cmpnt_codec =
 		snd_soc_rtd_to_codec(rtd, 0)->component;
 	struct snd_soc_component *cmpnt_afe =
 		snd_soc_rtdcom_lookup(rtd, AFE_PCM_NAME);
+	struct snd_soc_component *cmpnt_accdet;
+	struct snd_soc_component *component;
 	struct mtk_base_afe *afe = snd_soc_component_get_drvdata(cmpnt_afe);
 	struct mt6768_afe_private *afe_priv = afe->platform_priv;
+	int ret;
 
 	/* set mtkaif protocol */
 	mt6358_set_mtkaif_protocol(cmpnt_codec, MT6358_MTKAIF_PROTOCOL_1);
 	afe_priv->mtkaif_protocol = MT6768_MTKAIF_PROTOCOL_1;
+
+	cmpnt_accdet = NULL;
+	for_each_card_auxs(rtd->card, component) {
+		if (component->driver->name &&
+		    !strcmp(component->driver->name, MT6358_ACCDET_DEVNAME)) {
+			cmpnt_accdet = component;
+			break;
+		}
+	}
+
+	if (cmpnt_accdet) {
+		ret = snd_soc_card_jack_new_pins(rtd->card, "Headset Jack",
+						 SND_JACK_HEADSET |
+						 SND_JACK_BTN_0 |
+						 SND_JACK_BTN_1 |
+						 SND_JACK_BTN_2 |
+						 SND_JACK_BTN_3,
+						 &priv->headset_jack,
+						 mt6768_headset_jack_pins,
+						 ARRAY_SIZE(mt6768_headset_jack_pins));
+		if (ret) {
+			dev_err(rtd->dev, "Headset Jack create failed: %d\n", ret);
+			return ret;
+		}
+
+		ret = mt6358_accdet_enable_jack_detect(cmpnt_accdet,
+						       &priv->headset_jack);
+		if (ret) {
+			dev_err(rtd->dev, "Headset Jack enable failed: %d\n", ret);
+			return ret;
+		}
+	}
 
 	return 0;
 }
