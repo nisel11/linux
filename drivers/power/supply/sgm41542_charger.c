@@ -157,6 +157,17 @@ struct sgm4154x_state {
 	u8 ntc_fault;
 };
 
+struct sgm4154x_chip_data {
+	const char *name;
+	const char *psy_name;
+	u8 pn_mask;
+	u8 pn_id;
+	int vreg_min_uv;
+	int vreg_step_uv;
+	bool vreg_special_0f;
+	u8 vac_ovp;
+};
+
 struct sgm4154x_device {
 	struct device *dev;
 	struct power_supply *charger;
@@ -168,6 +179,30 @@ struct sgm4154x_device {
 	bool watchdog_enable;
 	struct workqueue_struct *sgm_monitor_wq;
 	struct delayed_work sgm_delay_work;
+	const struct sgm4154x_chip_data *chip;
+	struct power_supply_desc desc;
+};
+
+static const struct sgm4154x_chip_data sgm41542_data = {
+	.name = "sgm41542",
+	.psy_name = "sgm4154x-charger",
+	.pn_mask = SGM4154X_PN_MASK,
+	.pn_id = SGM4154X_PN_ID,
+	.vreg_min_uv = SGM4154X_VREG_V_MIN_UV,
+	.vreg_step_uv = SGM4154X_VREG_V_STEP_UV,
+	.vreg_special_0f = true,
+	.vac_ovp = SGM4154X_OVP_DEFAULT,
+};
+
+static const struct sgm4154x_chip_data sc8960x_data = {
+	.name = "sc8960x",
+	.psy_name = "sc8960x-charger",
+	.pn_mask = GENMASK(6, 3),
+	.pn_id = 0x03 << 3,
+	.vreg_min_uv = 3848000,
+	.vreg_step_uv = 32000,
+	.vreg_special_0f = false,
+	.vac_ovp = SGM4154X_OVP_6_5V,
 };
 
 enum SGM4154X_VINDPM_OS {
@@ -268,10 +303,10 @@ static int sgm4154x_set_chrg_volt(struct sgm4154x_device *sgm, int chrg_volt)
 	 * also clamp anything below 4352000uv to 4304000uv to prevent
 	 * overcharging.
 	 */
-	chrg_volt = clamp(chrg_volt, SGM4154X_VREG_V_MIN_UV, sgm->init_data.max_vreg);
-	if (chrg_volt < 4352000)
-		chrg_volt = clamp(chrg_volt, SGM4154X_VREG_V_MIN_UV, 4304000);
-	reg_val = (chrg_volt - SGM4154X_VREG_V_MIN_UV) / SGM4154X_VREG_V_STEP_UV;
+	chrg_volt = clamp(chrg_volt, sgm->chip->vreg_min_uv, sgm->init_data.max_vreg);
+	if (sgm->chip->vreg_special_0f && chrg_volt < 4352000)
+		chrg_volt = clamp(chrg_volt, sgm->chip->vreg_min_uv, 4304000);
+	reg_val = (chrg_volt - sgm->chip->vreg_min_uv) / sgm->chip->vreg_step_uv;
 	reg_val = FIELD_PREP(SGM4154X_VREG_V_MASK, reg_val);
 	ret = regmap_update_bits(sgm->regmap,
 				 SGM4154X_CHRG_CTRL_4,
@@ -300,10 +335,10 @@ static int sgm4154x_get_chrg_volt(struct sgm4154x_device *sgm)
 	 * 0x01111 is a special value meaning 4352000uV, all other
 	 * values are as expected based on the offset and step values.
 	 */
-	if (val == 0x0f)
+	if (sgm->chip->vreg_special_0f && val == 0x0f)
 		return 4352000;
 
-	return val * SGM4154X_VREG_V_STEP_UV + SGM4154X_VREG_V_MIN_UV;
+	return val * sgm->chip->vreg_step_uv + sgm->chip->vreg_min_uv;
 }
 
 static int sgm4154x_set_input_volt_lim(struct sgm4154x_device *sgm,
@@ -511,7 +546,7 @@ static int sgm4154x_set_vac_ovp(struct sgm4154x_device *sgm)
 	int reg_val;
 	int ret;
 
-	reg_val = SGM4154X_OVP_DEFAULT & SGM4154X_VAC_OVP_MASK;
+	reg_val = sgm->chip->vac_ovp & SGM4154X_VAC_OVP_MASK;
 
 	ret = regmap_update_bits(sgm->regmap,
 				 SGM4154X_CHRG_CTRL_6,
@@ -953,8 +988,8 @@ static int sgm4154x_hw_chipid_detect(struct sgm4154x_device *sgm)
 	if (ret)
 		return ret;
 
-	if ((val & SGM4154X_PN_MASK) != SGM4154X_PN_ID)
-		dev_warn(sgm->dev, "sgm4154x device ID mismatch\n");
+	if ((val & sgm->chip->pn_mask) != sgm->chip->pn_id)
+		dev_warn(sgm->dev, "%s device ID mismatch\n", sgm->chip->name);
 
 	return 0;
 }
@@ -994,6 +1029,10 @@ static int sgm4154x_probe(struct i2c_client *client)
 
 	sgm->dev = dev;
 
+	sgm->chip = i2c_get_match_data(client);
+	if (!sgm->chip)
+		sgm->chip = &sgm41542_data;
+
 	sgm->regmap = devm_regmap_init_i2c(client, &sgm4154x_regmap_config);
 	if (IS_ERR(sgm->regmap))
 		return dev_err_probe(dev, PTR_ERR(sgm->regmap),
@@ -1024,8 +1063,11 @@ static int sgm4154x_probe(struct i2c_client *client)
 	psy_cfg.drv_data = sgm;
 	psy_cfg.fwnode = dev_fwnode(dev);
 
+	sgm->desc = sgm4154x_power_supply_desc;
+	sgm->desc.name = sgm->chip->psy_name;
+
 	sgm->charger = devm_power_supply_register(sgm->dev,
-						  &sgm4154x_power_supply_desc,
+						  &sgm->desc,
 						  &psy_cfg);
 	if (IS_ERR(sgm->charger))
 		return dev_err_probe(dev, PTR_ERR(sgm->charger),
@@ -1105,7 +1147,8 @@ static const struct i2c_device_id sgm4154x_i2c_ids[] = {
 MODULE_DEVICE_TABLE(i2c, sgm4154x_i2c_ids);
 
 static const struct of_device_id sgm4154x_of_match[] = {
-	{ .compatible = "sgmicro,sgm41542", },
+	{ .compatible = "sgmicro,sgm41542", .data = &sgm41542_data },
+	{ .compatible = "sc,sc89601d", .data = &sc8960x_data },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, sgm4154x_of_match);

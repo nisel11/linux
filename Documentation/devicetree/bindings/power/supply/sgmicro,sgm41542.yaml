@@ -4,10 +4,11 @@
 $id: http://devicetree.org/schemas/power/supply/sgmicro,sgm41542.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: SGM41542 Battery Charger
+title: SGM41542/SC8960x Battery Charger
 
-description:
-  The SGMicro SGM41542 is a single cell battery charger/boost controller.
+description: |
+  The SGMicro SGM41542 and the register-compatible Southchip SC8960x are
+  single cell battery chargers/boost controllers.
 
 maintainers:
   - Chris Morgan <macromorgan@hotmail.com>
@@ -18,7 +19,9 @@ allOf:
 
 properties:
   compatible:
-    const: sgmicro,sgm41542
+    enum:
+      - sgmicro,sgm41542
+      - sc,sc89601d
 
   input-current-limit-microamp:
     default: 2400000
