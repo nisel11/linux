@@ -48,6 +48,8 @@ enum mtk_hw_reg_idx {
 	VENC_SYS = NUM_MAX_VDEC_REG_BASE,
 	/* vp8 encoder */
 	VENC_LT_SYS,
+	/* direct-MMIO H.264 encoder core (MT6768) */
+	VENC_CORE,
 	NUM_MAX_VCODEC_REG_BASE
 };
 

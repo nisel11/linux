@@ -25,7 +25,8 @@ int venc_if_init(struct mtk_vcodec_enc_ctx *ctx, unsigned int fourcc)
 		ctx->enc_if = &venc_vp8_if;
 		break;
 	case V4L2_PIX_FMT_H264:
-		ctx->enc_if = &venc_h264_if;
+		ctx->enc_if = MTK_ENC_CTX_IS_DIRECT(ctx) ?
+			      &venc_h264_direct_if : &venc_h264_if;
 		break;
 	default:
 		return -EINVAL;

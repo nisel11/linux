@@ -16,6 +16,7 @@
 
 #define MTK_ENC_CTX_IS_EXT(ctx) ((ctx)->dev->venc_pdata->uses_ext)
 #define MTK_ENC_IOVA_IS_34BIT(ctx) ((ctx)->dev->venc_pdata->uses_34bit)
+#define MTK_ENC_CTX_IS_DIRECT(ctx) ((ctx)->dev->venc_pdata->uses_direct_mmio)
 
 /**
  * struct mtk_vcodec_enc_pdata - compatible data for each IC
@@ -29,6 +30,8 @@
  * @num_output_formats: number of entries in output_formats
  * @core_id: stand for h264 or vp8 encode index
  * @uses_34bit: whether the encoder uses 34-bit iova
+ * @uses_direct_mmio: whether the encoder is programmed directly from the
+ *		      kernel instead of through VPU/SCP firmware
  */
 struct mtk_vcodec_enc_pdata {
 	bool uses_ext;
@@ -40,6 +43,7 @@ struct mtk_vcodec_enc_pdata {
 	size_t num_output_formats;
 	u8 core_id;
 	bool uses_34bit;
+	bool uses_direct_mmio;
 };
 
 /*

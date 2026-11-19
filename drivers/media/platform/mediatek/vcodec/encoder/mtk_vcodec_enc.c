@@ -9,6 +9,7 @@
 #include <media/v4l2-mem2mem.h>
 #include <media/videobuf2-dma-contig.h>
 #include <linux/pm_runtime.h>
+#include <linux/sizes.h>
 
 #include "mtk_vcodec_enc.h"
 #include "venc_drv_if.h"
@@ -213,6 +214,8 @@ static int mtk_vcodec_enc_get_chip_name(struct mtk_vcodec_enc_ctx *ctx)
 		return 8195;
 	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8188-vcodec-enc"))
 		return 8188;
+	else if (of_device_is_compatible(dev->of_node, "mediatek,mt6768-vcodec-enc"))
+		return 6768;
 	else
 		return 8173;
 }
@@ -279,12 +282,16 @@ static struct mtk_q_data *mtk_venc_get_q_data(struct mtk_vcodec_enc_ctx *ctx,
 	return &ctx->q_data[MTK_Q_DATA_DST];
 }
 
-static void vidioc_try_fmt_cap(struct v4l2_format *f)
+static void vidioc_try_fmt_cap(struct mtk_vcodec_enc_ctx *ctx,
+			       struct v4l2_format *f)
 {
 	f->fmt.pix_mp.field = V4L2_FIELD_NONE;
 	f->fmt.pix_mp.num_planes = 1;
 	f->fmt.pix_mp.plane_fmt[0].bytesperline = 0;
 	f->fmt.pix_mp.flags = 0;
+	if (ctx->dev->venc_pdata->uses_direct_mmio)
+		f->fmt.pix_mp.plane_fmt[0].sizeimage =
+			max_t(u32, f->fmt.pix_mp.plane_fmt[0].sizeimage, SZ_4M);
 }
 
 /* V4L2 specification suggests the driver corrects the format struct if any of
@@ -377,6 +384,7 @@ static void mtk_venc_set_param(struct mtk_vcodec_enc_ctx *ctx,
 		param->input_yuv_fmt = VENC_YUV_FORMAT_YV12;
 		break;
 	case V4L2_PIX_FMT_NV12M:
+	case V4L2_PIX_FMT_MM21:
 		param->input_yuv_fmt = VENC_YUV_FORMAT_NV12;
 		break;
 	case V4L2_PIX_FMT_NV21M:
@@ -434,7 +442,7 @@ static int vidioc_venc_s_fmt_cap(struct file *file, void *priv,
 	}
 
 	q_data->fmt = fmt;
-	vidioc_try_fmt_cap(f);
+	vidioc_try_fmt_cap(ctx, f);
 
 	q_data->coded_width = f->fmt.pix_mp.width;
 	q_data->coded_height = f->fmt.pix_mp.height;
@@ -555,7 +563,7 @@ static int vidioc_try_fmt_vid_cap_mplane(struct file *file, void *priv,
 	f->fmt.pix_mp.quantization = ctx->quantization;
 	f->fmt.pix_mp.xfer_func = ctx->xfer_func;
 
-	vidioc_try_fmt_cap(f);
+	vidioc_try_fmt_cap(ctx, f);
 
 	return 0;
 }
@@ -1291,6 +1299,7 @@ void mtk_vcodec_enc_set_default_params(struct mtk_vcodec_enc_ctx *ctx)
 	q_data->fmt = &ctx->dev->venc_pdata->capture_formats[0];
 	q_data->field = V4L2_FIELD_NONE;
 	ctx->q_data[MTK_Q_DATA_DST].sizeimage[0] =
+		ctx->dev->venc_pdata->uses_direct_mmio ? SZ_4M :
 		DFT_CFG_WIDTH * DFT_CFG_HEIGHT;
 	ctx->q_data[MTK_Q_DATA_DST].bytesperline[0] = 0;
 

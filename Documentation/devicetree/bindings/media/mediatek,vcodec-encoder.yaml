@@ -20,6 +20,7 @@ properties:
           - enum:
               - mediatek,mt8173-vcodec-enc-vp8
               - mediatek,mt8173-vcodec-enc
+              - mediatek,mt6768-vcodec-enc
               - mediatek,mt8183-vcodec-enc
               - mediatek,mt8188-vcodec-enc
               - mediatek,mt8192-vcodec-enc
@@ -28,7 +29,12 @@ properties:
           - const: mediatek,mt8186-vcodec-enc
           - const: mediatek,mt8183-vcodec-enc
   reg:
-    maxItems: 1
+    minItems: 1
+    maxItems: 2
+
+  reg-names:
+    minItems: 1
+    maxItems: 2
 
   interrupts:
     maxItems: 1
@@ -101,6 +107,26 @@ allOf:
     then:
       required:
         - mediatek,vpu
+
+  - if:
+      properties:
+        compatible:
+          const: mediatek,mt6768-vcodec-enc
+
+    then:
+      properties:
+        reg:
+          minItems: 2
+          maxItems: 2
+        reg-names:
+          items:
+            - const: sys
+            - const: core
+        clocks:
+          maxItems: 1
+        clock-names:
+          items:
+            - const: venc
 
   - if:
       properties:

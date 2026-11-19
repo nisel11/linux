@@ -59,6 +59,23 @@ static const struct mtk_video_fmt mtk_video_formats_capture_vp8[] =  {
 	},
 };
 
+/* Direct-MMIO MT6768 VENC accepts the same contiguous layouts that its
+ * frame-buffer path uses for the decoder.  Keep this list separate so the
+ * firmware-based encoders of other SoCs do not change their format set.
+ */
+static const struct mtk_video_fmt mtk_video_formats_output_direct[] = {
+	{
+		.fourcc = V4L2_PIX_FMT_NV12M,
+		.type = MTK_FMT_FRAME,
+		.num_planes = 2,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_MM21,
+		.type = MTK_FMT_FRAME,
+		.num_planes = 2,
+	},
+};
+
 static void clean_irq_status(unsigned int irq_status, void __iomem *addr)
 {
 	if (irq_status & MTK_VENC_IRQ_STATUS_PAUSE)
@@ -154,7 +171,8 @@ static int fops_vcodec_open(struct file *file)
 	ctx->empty_flush_buf.vb.vb2_buf.vb2_queue = src_vq;
 	mtk_vcodec_enc_set_default_params(ctx);
 
-	if (v4l2_fh_is_singular(&ctx->fh)) {
+	if (v4l2_fh_is_singular(&ctx->fh) &&
+	    !dev->venc_pdata->uses_direct_mmio) {
 		/*
 		 * load fireware to checks if it was loaded already and
 		 * does nothing in that case
@@ -246,7 +264,7 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
 	struct mtk_vcodec_enc_dev *dev;
 	struct video_device *vfd_enc;
 	phandle rproc_phandle;
-	enum mtk_vcodec_fw_type fw_type;
+	enum mtk_vcodec_fw_type fw_type = VPU;
 	int ret;
 
 	dev = devm_kzalloc(&pdev->dev, sizeof(*dev), GFP_KERNEL);
@@ -255,24 +273,33 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&dev->ctx_list);
 	dev->plat_dev = pdev;
+	dev->venc_pdata = of_device_get_match_data(&pdev->dev);
 
-	if (!of_property_read_u32(pdev->dev.of_node, "mediatek,vpu",
+	/*
+	 * A direct-MMIO encoder has no firmware mailbox: registers are
+	 * programmed by venc_h264_direct_if.c, so there is no rproc phandle
+	 * and no mtk_vcodec_fw object to create here.
+	 */
+	if (!dev->venc_pdata->uses_direct_mmio &&
+	    !of_property_read_u32(pdev->dev.of_node, "mediatek,vpu",
 				  &rproc_phandle)) {
 		fw_type = VPU;
-	} else if (!of_property_read_u32(pdev->dev.of_node, "mediatek,scp",
+	} else if (!dev->venc_pdata->uses_direct_mmio &&
+		   !of_property_read_u32(pdev->dev.of_node, "mediatek,scp",
 					 &rproc_phandle)) {
 		fw_type = SCP;
-	} else {
+	} else if (!dev->venc_pdata->uses_direct_mmio) {
 		dev_err(&pdev->dev, "[MTK VCODEC] Could not get venc IPI device");
 		return -ENODEV;
 	}
 	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
 
-	dev->fw_handler = mtk_vcodec_fw_select(dev, fw_type, ENCODER);
-	if (IS_ERR(dev->fw_handler))
-		return PTR_ERR(dev->fw_handler);
+	if (!dev->venc_pdata->uses_direct_mmio) {
+		dev->fw_handler = mtk_vcodec_fw_select(dev, fw_type, ENCODER);
+		if (IS_ERR(dev->fw_handler))
+			return PTR_ERR(dev->fw_handler);
+	}
 
-	dev->venc_pdata = of_device_get_match_data(&pdev->dev);
 	ret = mtk_vcodec_init_enc_clk(dev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "[MTK VCODEC] Failed to get mtk vcodec clock source!");
@@ -281,11 +308,27 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(&pdev->dev);
 
-	dev->reg_base[dev->venc_pdata->core_id] =
-		devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(dev->reg_base[dev->venc_pdata->core_id])) {
-		ret = PTR_ERR(dev->reg_base[dev->venc_pdata->core_id]);
-		goto err_res;
+	if (dev->venc_pdata->uses_direct_mmio) {
+		/* 0x17000000 (reg 0) is the vencsys clock controller, not the
+		 * VENC register file.  All encoder registers, including the
+		 * IRQ status/ACK at 0x5c/0x60 and the byte count at 0x98,
+		 * live in the 0x17020000 (reg 1) window.  Treat it as both
+		 * banks so venc_direct_{read,write}() always hit real HW.
+		 */
+		dev->reg_base[VENC_SYS] =
+			devm_platform_ioremap_resource_byname(pdev, "core");
+		if (IS_ERR(dev->reg_base[VENC_SYS])) {
+			ret = PTR_ERR(dev->reg_base[VENC_SYS]);
+			goto err_res;
+		}
+		dev->reg_base[VENC_CORE] = dev->reg_base[VENC_SYS];
+	} else {
+		dev->reg_base[dev->venc_pdata->core_id] =
+			devm_platform_ioremap_resource(pdev, 0);
+		if (IS_ERR(dev->reg_base[dev->venc_pdata->core_id])) {
+			ret = PTR_ERR(dev->reg_base[dev->venc_pdata->core_id]);
+			goto err_res;
+		}
 	}
 
 	dev->enc_irq = platform_get_irq(pdev, 0);
@@ -451,7 +494,21 @@ static const struct mtk_vcodec_enc_pdata mt8195_pdata = {
 	.core_id = VENC_SYS,
 };
 
+static const struct mtk_vcodec_enc_pdata mt6768_pdata = {
+	.capture_formats = mtk_video_formats_capture_h264,
+	.num_capture_formats = ARRAY_SIZE(mtk_video_formats_capture_h264),
+	.output_formats = mtk_video_formats_output_direct,
+	.num_output_formats = ARRAY_SIZE(mtk_video_formats_output_direct),
+	.min_bitrate = 64,
+	/* MT6768 VENC is an FHD-class encoder */
+	.max_bitrate = 40000000,
+	.core_id = VENC_SYS,
+	.uses_direct_mmio = true,
+};
+
 static const struct of_device_id mtk_vcodec_enc_match[] = {
+	{.compatible = "mediatek,mt6768-vcodec-enc",
+			.data = &mt6768_pdata},
 	{.compatible = "mediatek,mt8173-vcodec-enc",
 			.data = &mt8173_avc_pdata},
 	{.compatible = "mediatek,mt8173-vcodec-enc-vp8",

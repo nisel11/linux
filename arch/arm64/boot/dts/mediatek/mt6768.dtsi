@@ -2485,6 +2485,27 @@
 			#clock-cells = <1>;
 		};
 
+		vcodec_enc: video-codec@17020000 {
+			compatible = "mediatek,mt6768-vcodec-enc";
+			reg = <0 0x17000000 0 0x1000>,   /* VENC_SYS wrapper */
+			      <0 0x17020000 0 0x10000>; /* VENC core */
+			reg-names = "sys", "core";
+			interrupts = <GIC_SPI 243 IRQ_TYPE_LEVEL_LOW>;
+			iommus = <&iommu M4U_PORT_VENC_RCPU>,
+				 <&iommu M4U_PORT_VENC_REC>,
+				 <&iommu M4U_PORT_VENC_BSDMA>,
+				 <&iommu M4U_PORT_VENC_SV_COMV>,
+				 <&iommu M4U_PORT_VENC_RD_COMV>,
+				 <&iommu M4U_PORT_VENC_CUR_LUMA>,
+				 <&iommu M4U_PORT_VENC_CUR_CHROMA>,
+				 <&iommu M4U_PORT_VENC_REF_LUMA>,
+				 <&iommu M4U_PORT_VENC_REF_CHROMA>;
+			power-domains = <&spm MT6768_POWER_DOMAIN_VENC>;
+			clocks = <&vencsys CLK_VENC_VENC>;
+			clock-names = "venc";
+			status = "okay";
+		};
+
 		larb4: memory-controller@17010000 {
 			compatible = "mediatek,mt6768-smi-larb";
 			reg = <0 0x17010000 0 0x1000>;
