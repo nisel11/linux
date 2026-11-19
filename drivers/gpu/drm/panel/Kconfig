@@ -178,6 +178,14 @@ config DRM_PANEL_FEIYANG_FY07024DI26A30D
 	  Say Y if you want to enable support for panels based on the
 	  Feiyang FY07024DI26A30-D MIPI-DSI interface.
 
+config DRM_PANEL_FOCALTECH_FT8057
+	tristate "Focaltech FT8057"
+	depends on DRM_MIPI_DSI
+	depends on BACKLIGHT_CLASS_DEVICE
+	help
+	  Say Y here if you want to enable support for the Focaltech
+	  FT8057 MIPI-DSI panel, found on the Xiaomi Redmi 12C.
+
 config DRM_PANEL_FOCALTECH_OTA7290B
 	tristate "Focaltech OTA7290B"
 	depends on DRM_MIPI_DSI
