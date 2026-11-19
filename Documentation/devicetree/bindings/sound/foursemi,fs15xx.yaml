@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/foursemi,fs15xx.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: FourSemi FS15xx GPIO pulse controlled speaker amplifier
+
+maintainers:
+  - Roman Vivchar <rva333@protonmail.com>
+
+description: |
+  FS15xx and SPC1910 amplifiers select their operating mode with timed pulses
+  on a command GPIO. They have no audio data interface. The optional mod GPIO
+  is low while boost is enabled. The optional id GPIO can be sampled for board
+  identification.
+
+properties:
+  compatible:
+    const: foursemi,fs15xx
+
+  fsm,dev-type:
+    description: Zero selects the SPC1910 protocol; one selects FS15xx.
+    enum: [0, 1]
+
+  fsm,id-gpio:
+    description: Optional identification input, driven high briefly for sampling.
+    maxItems: 1
+
+  fsm,cmd-gpio:
+    description: Command line. Its GPIO controller must support atomic access.
+    maxItems: 1
+
+  fsm,mod-gpio:
+    description: Optional boost control, active at a low physical level.
+    maxItems: 1
+
+  pinctrl-names:
+    items:
+      - const: fs15xx_id_default
+      - const: fs15xx_cmd_default
+      - const: fs15xx_mod_default
+
+  pinctrl-0: true
+  pinctrl-1: true
+  pinctrl-2: true
+
+required:
+  - compatible
+  - fsm,dev-type
+  - fsm,cmd-gpio
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    amplifier {
+        compatible = "foursemi,fs15xx";
+        fsm,dev-type = <1>;
+        fsm,cmd-gpio = <&pio 179 GPIO_ACTIVE_HIGH>;
+    };

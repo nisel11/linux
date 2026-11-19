@@ -1366,6 +1366,13 @@ config SND_SOC_FS_AMP_LIB
 	select CRC16
 	tristate
 
+config SND_SOC_FS15XX
+	tristate "FourSemi FS15xx GPIO speaker amplifier"
+	depends on GPIOLIB && SND_SOC
+	help
+	  Enable the GPIO pulse controlled FourSemi FS15xx and SPC1910
+	  speaker amplifiers. The device has no audio data interface.
+
 config SND_SOC_FS210X
 	tristate 'FourSemi FS2104/5S digital audio amplifier'
 	depends on I2C
