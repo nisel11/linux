@@ -6,6 +6,10 @@ mt6768-xiaomi-merlin-nt36672a-ktd3137-dtbs := mt6768-xiaomi-merlin.dtb \
 	mt6768-xiaomi-merlin-nt36672a.dtbo \
 	mt6768-xiaomi-merlin-ktd3137.dtbo
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6768-xiaomi-merlin-nt36672a-ktd3137.dtb
+mt6768-xiaomi-earth-ft8057hd-sc89601d-dtbs := mt6768-xiaomi-earth.dtb \
+	mt6768-xiaomi-earth-ft8057hd.dtbo \
+	mt6768-xiaomi-earth-sc89601d.dtbo
+dtb-$(CONFIG_ARCH_MEDIATEK) += mt6768-xiaomi-earth-ft8057hd-sc89601d.dtb
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6779-evb.dtb
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-evb.dtb
 dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-sony-xperia-m5.dtb

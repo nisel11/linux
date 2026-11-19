@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: GPL-2.0+
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/interrupt-controller/irq.h>
+
+&i2c7 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <400000>;
+	pinctrl-0 = <&i2c7_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	sc89601d: charger@6b {
+		compatible = "sc,sc89601d";
+		reg = <0x6b>;
+		interrupt-parent = <&pio>;
+		interrupts = <20 IRQ_TYPE_EDGE_FALLING>;
+		monitored-battery = <&battery>;
+		input-voltage-limit-microvolt = <4600000>;
+		input-current-limit-microamp = <2000000>;
+
+		regulators {
+			otg-vbus {
+				regulator-min-microvolt = <5000000>;
+				regulator-max-microvolt = <5000000>;
+			};
+		};
+	};
+};
+
+&mt6358gauge {
+	power-supplies = <&sc89601d>;
+};
