@@ -21,6 +21,10 @@
 			mediatek,dmic-mode = <0>; /* two-wires */
 		};
 
+		accdet: accdet {
+			compatible = "mediatek,mt6358-accdet";
+		};
+
 		mt6358regulator: regulators {
 			compatible = "mediatek,mt6358-regulator";
 
