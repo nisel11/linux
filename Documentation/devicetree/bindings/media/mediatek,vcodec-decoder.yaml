@@ -18,24 +18,28 @@ properties:
     enum:
       - mediatek,mt8173-vcodec-dec
       - mediatek,mt8183-vcodec-dec
+      - mediatek,mt6768-vcodec-dec
 
   reg:
-    minItems: 11
+    minItems: 7
     maxItems: 11
 
   reg-names:
+    minItems: 7
+    maxItems: 11
     items:
-      - const: misc
-      - const: ld
-      - const: top
-      - const: cm
-      - const: ad
-      - const: av
-      - const: pp
-      - const: hwd
-      - const: hwq
-      - const: hwb
-      - const: hwg
+      enum:
+        - misc
+        - ld
+        - top
+        - cm
+        - ad
+        - av
+        - pp
+        - hwd
+        - hwq
+        - hwb
+        - hwg
 
   interrupts:
     maxItems: 1
@@ -92,6 +96,46 @@ allOf:
       properties:
         compatible:
           contains:
+            const: mediatek,mt6768-vcodec-dec
+    then:
+      required:
+        - reg-names
+
+      properties:
+        reg:
+          minItems: 7
+          maxItems: 7
+
+        reg-names:
+          minItems: 7
+          maxItems: 7
+          items:
+            - const: misc
+            - const: ld
+            - const: top
+            - const: cm
+            - const: ad
+            - const: av
+            - const: pp
+
+        iommus:
+          minItems: 9
+          maxItems: 9
+
+        clocks:
+          minItems: 1
+          maxItems: 1
+
+        clock-names:
+          minItems: 1
+          maxItems: 1
+          items:
+            - const: vdec
+
+  - if:
+      properties:
+        compatible:
+          contains:
             enum:
               - mediatek,mt8183-vcodec-dec
 
@@ -100,6 +144,24 @@ allOf:
         - mediatek,scp
 
       properties:
+        reg:
+          minItems: 11
+          maxItems: 11
+
+        reg-names:
+          items:
+            - const: misc
+            - const: ld
+            - const: top
+            - const: cm
+            - const: ad
+            - const: av
+            - const: pp
+            - const: hwd
+            - const: hwq
+            - const: hwb
+            - const: hwg
+
         clocks:
           minItems: 1
           maxItems: 1
@@ -120,6 +182,24 @@ allOf:
         - mediatek,vpu
 
       properties:
+        reg:
+          minItems: 11
+          maxItems: 11
+
+        reg-names:
+          items:
+            - const: misc
+            - const: ld
+            - const: top
+            - const: cm
+            - const: ad
+            - const: av
+            - const: pp
+            - const: hwd
+            - const: hwq
+            - const: hwb
+            - const: hwg
+
         clocks:
           minItems: 8
           maxItems: 8
@@ -195,4 +275,36 @@ examples:
                              <&topckgen CLK_TOP_UNIVPLL_D2>,
                              <&topckgen CLK_TOP_VCODECPLL>;
       assigned-clock-rates = <0>, <0>, <0>, <1482000000>, <800000000>;
+    };
+  - |
+    #include <dt-bindings/clock/mediatek,mt6768-clock.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/interrupt-controller/irq.h>
+    #include <dt-bindings/memory/mediatek,mt6768-memory-port.h>
+    #include <dt-bindings/power/mediatek,mt6768-power-controller.h>
+
+    vcodec_dec: video-codec@16020000 {
+      compatible = "mediatek,mt6768-vcodec-dec";
+      reg = <0 0x16025000 0 0x1000>, /* VDEC_MISC */
+            <0 0x16020000 0 0x400>,  /* VDEC_VLD */
+            <0 0x16020800 0 0x800>,  /* VDEC_VLD_TOP */
+            <0 0x16021000 0 0x1000>, /* VDEC_MC */
+            <0 0x16023000 0 0x1000>, /* VDEC_AVC_MV */
+            <0 0x16022000 0 0x1000>, /* VDEC_AVC_VLD */
+            <0 0x16024000 0 0x1000>; /* VDEC_PP */
+      reg-names = "misc", "ld", "top", "cm", "ad", "av", "pp";
+      interrupts = <GIC_SPI 246 IRQ_TYPE_LEVEL_LOW>;
+      iommus = <&iommu M4U_PORT_HW_VDEC_MC_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_PP_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_VLD_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_VLD2_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_AVC_MV_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_PRED_RD_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_PRED_WR_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_PPWRAP_EXT>,
+               <&iommu M4U_PORT_HW_VDEC_TILE_EXT>;
+      mediatek,vdecsys = <&vdecsys>;
+      power-domains = <&spm MT6768_POWER_DOMAIN_VDEC>;
+      clocks = <&vdecsys CLK_VDEC_VDEC>;
+      clock-names = "vdec";
     };

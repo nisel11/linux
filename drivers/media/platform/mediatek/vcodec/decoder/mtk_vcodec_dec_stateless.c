@@ -8,6 +8,7 @@
 
 #include "mtk_vcodec_dec.h"
 #include "mtk_vcodec_dec_pm.h"
+#include "vdec/vdec_direct_hw.h"
 #include "vdec_drv_if.h"
 
 /**
@@ -42,6 +43,18 @@ static const struct mtk_stateless_control mtk_stateless_controls[] = {
 	{
 		.cfg = {
 			.id = V4L2_CID_STATELESS_H264_DECODE_PARAMS,
+		},
+		.codec_type = V4L2_PIX_FMT_H264_SLICE,
+	},
+	{
+		.cfg = {
+			.id = V4L2_CID_STATELESS_H264_SLICE_PARAMS,
+		},
+		.codec_type = V4L2_PIX_FMT_H264_SLICE,
+	},
+	{
+		.cfg = {
+			.id = V4L2_CID_STATELESS_H264_PRED_WEIGHTS,
 		},
 		.codec_type = V4L2_PIX_FMT_H264_SLICE,
 	},
@@ -343,7 +356,16 @@ static void mtk_vdec_worker(struct work_struct *work)
 	bs_src->dma_addr = vb2_dma_contig_plane_dma_addr(vb2_src, 0);
 	bs_src->size = (size_t)vb2_src->planes[0].bytesused;
 	if (!bs_src->va) {
-		v4l2_m2m_job_finish(dev->m2m_dev_dec, ctx->m2m_ctx);
+		if (dev->vdec_pdata->uses_direct_mmio) {
+			if (vb2_src->req_obj.req)
+				v4l2_ctrl_request_complete(vb2_src->req_obj.req,
+							   &ctx->ctrl_hdl);
+			v4l2_m2m_buf_done_and_job_finish(dev->m2m_dev_dec,
+							 ctx->m2m_ctx,
+							 VB2_BUF_STATE_ERROR);
+		} else {
+			v4l2_m2m_job_finish(dev->m2m_dev_dec, ctx->m2m_ctx);
+		}
 		mtk_v4l2_vdec_err(ctx, "[%d] id=%d source buffer is NULL", ctx->id,
 				  vb2_src->index);
 		return;
@@ -354,7 +376,12 @@ static void mtk_vdec_worker(struct work_struct *work)
 	/* Apply request controls. */
 	mreq = vb2_src->req_obj.req;
 	if (WARN_ON(!mreq)) {
-		v4l2_m2m_job_finish(dev->m2m_dev_dec, ctx->m2m_ctx);
+		if (dev->vdec_pdata->uses_direct_mmio)
+			v4l2_m2m_buf_done_and_job_finish(dev->m2m_dev_dec,
+							 ctx->m2m_ctx,
+							 VB2_BUF_STATE_ERROR);
+		else
+			v4l2_m2m_job_finish(dev->m2m_dev_dec, ctx->m2m_ctx);
 		mtk_v4l2_vdec_err(ctx, "vb2 buffer media request is NULL");
 		return;
 	}
@@ -387,12 +414,23 @@ static void mtk_vdec_worker(struct work_struct *work)
 		buf_state = VB2_BUF_STATE_DONE;
 	}
 
+	if (dev->vdec_pdata->uses_direct_mmio) {
+		v4l2_ctrl_request_complete(mreq, &ctx->ctrl_hdl);
+		kref_put(&req->refcount, mtk_vcodec_dec_request_release);
+		v4l2_m2m_buf_done_and_job_finish(dev->m2m_dev_dec,
+						 ctx->m2m_ctx, buf_state);
+		kref_put(&req->refcount, mtk_vcodec_dec_request_release);
+		return;
+	}
+
 	v4l2_ctrl_request_complete(mreq, &ctx->ctrl_hdl);
 	v4l2_m2m_src_buf_remove(ctx->m2m_ctx);
 	v4l2_m2m_buf_done(vb2_v4l2_src, buf_state);
 
-	if (ret || !IS_VDEC_LAT_ARCH(dev->vdec_pdata->hw_arch) ||
-	    ctx->current_codec == V4L2_PIX_FMT_VP8_FRAME)
+	if (!ret && (vb2_v4l2_src->flags & V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF))
+		kref_put(&req->refcount, mtk_vcodec_dec_request_release);
+	else if (ret || !IS_VDEC_LAT_ARCH(dev->vdec_pdata->hw_arch) ||
+		 ctx->current_codec == V4L2_PIX_FMT_VP8_FRAME)
 		mtk_vdec_stateless_cap_to_disp(ctx, ret, mreq);
 
 done:
@@ -685,8 +723,25 @@ static void mtk_vcodec_dec_reset_controls(struct v4l2_ctrl_config *cfg,
 		break;
 	case V4L2_CID_MPEG_VIDEO_H264_PROFILE:
 		mtk_vcodec_dec_fill_h264_profile(cfg, ctx);
+		if (ctx->dev->vdec_pdata->uses_direct_mmio)
+			cfg->menu_skip_mask =
+				BIT(V4L2_MPEG_VIDEO_H264_PROFILE_EXTENDED);
 		mtk_v4l2_vdec_dbg(3, ctx, "h264 supported profile: %lld %lld", cfg->max,
 				  cfg->menu_skip_mask);
+		break;
+	case V4L2_CID_STATELESS_H264_DECODE_MODE:
+		if (ctx->dev->vdec_pdata->uses_direct_mmio) {
+			cfg->min = V4L2_STATELESS_H264_DECODE_MODE_SLICE_BASED;
+			cfg->def = V4L2_STATELESS_H264_DECODE_MODE_SLICE_BASED;
+			cfg->max = V4L2_STATELESS_H264_DECODE_MODE_SLICE_BASED;
+		}
+		break;
+	case V4L2_CID_STATELESS_H264_START_CODE:
+		if (ctx->dev->vdec_pdata->uses_direct_mmio) {
+			cfg->min = V4L2_STATELESS_H264_START_CODE_NONE;
+			cfg->def = V4L2_STATELESS_H264_START_CODE_ANNEX_B;
+			cfg->max = V4L2_STATELESS_H264_START_CODE_ANNEX_B;
+		}
 		break;
 	case V4L2_CID_MPEG_VIDEO_HEVC_PROFILE:
 		mtk_vcodec_dec_fill_h265_profile(cfg, ctx);
@@ -715,6 +770,12 @@ static int mtk_vcodec_dec_ctrls_setup(struct mtk_vcodec_dec_ctx *ctx)
 
 	for (i = 0; i < NUM_CTRLS; i++) {
 		struct v4l2_ctrl_config cfg = mtk_stateless_controls[i].cfg;
+
+		if (!ctx->dev->vdec_pdata->uses_direct_mmio &&
+		    (cfg.id == V4L2_CID_STATELESS_H264_SLICE_PARAMS ||
+		     cfg.id == V4L2_CID_STATELESS_H264_PRED_WEIGHTS))
+			continue;
+
 		cfg.ops = &mtk_vcodec_dec_ctrl_ops;
 
 		mtk_vcodec_dec_reset_controls(&cfg, ctx);
@@ -891,6 +952,9 @@ static void mtk_init_vdec_params(struct mtk_vcodec_dec_ctx *ctx)
 	/* Support request api for output plane */
 	src_vq->supports_requests = true;
 	src_vq->requires_requests = true;
+	if (ctx->dev->vdec_pdata->uses_direct_mmio)
+		src_vq->subsystem_flags |=
+			VB2_V4L2_FL_SUPPORTS_M2M_HOLD_CAPTURE_BUF;
 }
 
 static int vb2ops_vdec_out_buf_validate(struct vb2_buffer *vb)
@@ -923,6 +987,25 @@ const struct mtk_vcodec_dec_pdata mtk_vdec_8183_pdata = {
 	.default_out_fmt = &default_out_format,
 	.default_cap_fmt = &default_cap_format,
 	.uses_stateless_api = true,
+	.worker = mtk_vdec_worker,
+	.flush_decoder = mtk_vdec_flush_decoder,
+	.cap_to_disp = mtk_vdec_stateless_cap_to_disp,
+	.get_cap_buffer = vdec_get_cap_buffer,
+	.is_subdev_supported = false,
+	.hw_arch = MTK_VDEC_PURE_SINGLE_CORE,
+};
+
+const struct mtk_vcodec_dec_pdata mtk_vdec_direct_pdata = {
+	.init_vdec_params = mtk_init_vdec_params,
+	.ctrls_setup = mtk_vcodec_dec_ctrls_setup,
+	.vdec_vb2_ops = &mtk_vdec_request_vb2_ops,
+	.vdec_formats = mtk_video_formats,
+	.num_formats = &num_formats,
+	.default_out_fmt = &default_out_format,
+	.default_cap_fmt = &default_cap_format,
+	.uses_stateless_api = true,
+	.uses_direct_mmio = true,
+	.direct_hw_cfg = &vdec_direct_gen1_cfg,
 	.worker = mtk_vdec_worker,
 	.flush_decoder = mtk_vdec_flush_decoder,
 	.cap_to_disp = mtk_vdec_stateless_cap_to_disp,

@@ -60,6 +60,10 @@ static irqreturn_t mtk_vcodec_dec_irq_handler(int irq, void *priv)
 					VDEC_IRQ_CFG_REG;
 
 	ctx = mtk_vcodec_get_curr_ctx(dev, MTK_VDEC_CORE);
+	if (!ctx) {
+		dev_err(&dev->plat_dev->dev, "DEC ISR, curr_ctx is NULL");
+		return IRQ_HANDLED;
+	}
 
 	if (!mtk_vcodec_is_hw_active(dev)) {
 		mtk_v4l2_vdec_err(ctx, "DEC ISR, VDEC active is not 0x0");
@@ -246,7 +250,8 @@ static int fops_vcodec_open(struct file *file)
 	ctx->empty_flush_buf.vb.vb2_buf.vb2_queue = src_vq;
 	mtk_vcodec_dec_set_default_params(ctx);
 
-	if (v4l2_fh_is_singular(&ctx->fh)) {
+	if (!dev->vdec_pdata->uses_direct_mmio &&
+	    v4l2_fh_is_singular(&ctx->fh)) {
 		/*
 		 * Does nothing if firmware was already loaded.
 		 */
@@ -347,6 +352,8 @@ static void mtk_vcodec_dec_get_chip_name(struct mtk_vcodec_dec_dev *vdec_dev)
 		vdec_dev->chip_name = MTK_VDEC_MT8186;
 	else if (of_device_is_compatible(dev->of_node, "mediatek,mt8188-vcodec-dec"))
 		vdec_dev->chip_name = MTK_VDEC_MT8188;
+	else if (of_device_is_compatible(dev->of_node, "mediatek,mt6768-vcodec-dec"))
+		vdec_dev->chip_name = MTK_VDEC_MT6768;
 	else
 		vdec_dev->chip_name = MTK_VDEC_INVAL;
 }
@@ -373,21 +380,28 @@ static int mtk_vcodec_probe(struct platform_device *pdev)
 	}
 
 	dev->vdec_pdata = of_device_get_match_data(&pdev->dev);
-	if (!of_property_read_u32(pdev->dev.of_node, "mediatek,vpu",
-				  &rproc_phandle)) {
-		fw_type = VPU;
-	} else if (!of_property_read_u32(pdev->dev.of_node, "mediatek,scp",
-					 &rproc_phandle)) {
-		fw_type = SCP;
+	if (dev->vdec_pdata->uses_direct_mmio) {
+		dev->dec_capability = MTK_VDEC_FORMAT_H264_SLICE |
+				      MTK_VDEC_FORMAT_MM21;
 	} else {
-		dev_dbg(&pdev->dev, "Could not get vdec IPI device");
-		return -ENODEV;
+		if (!of_property_read_u32(pdev->dev.of_node, "mediatek,vpu",
+					  &rproc_phandle)) {
+			fw_type = VPU;
+		} else if (!of_property_read_u32(pdev->dev.of_node, "mediatek,scp",
+						 &rproc_phandle)) {
+			fw_type = SCP;
+		} else {
+			dev_dbg(&pdev->dev, "Could not get vdec IPI device");
+			return -ENODEV;
+		}
 	}
 	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
 
-	dev->fw_handler = mtk_vcodec_fw_select(dev, fw_type, DECODER);
-	if (IS_ERR(dev->fw_handler))
-		return PTR_ERR(dev->fw_handler);
+	if (!dev->vdec_pdata->uses_direct_mmio) {
+		dev->fw_handler = mtk_vcodec_fw_select(dev, fw_type, DECODER);
+		if (IS_ERR(dev->fw_handler))
+			return PTR_ERR(dev->fw_handler);
+	}
 
 	ret = mtk_vcodec_init_dec_resources(dev);
 	if (ret) {
@@ -559,6 +573,10 @@ static const struct of_device_id mtk_vcodec_match[] = {
 	{
 		.compatible = "mediatek,mt8188-vcodec-dec",
 		.data = &mtk_lat_sig_core_pdata,
+	},
+	{
+		.compatible = "mediatek,mt6768-vcodec-dec",
+		.data = &mtk_vdec_direct_pdata,
 	},
 	{},
 };

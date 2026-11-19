@@ -29,6 +29,7 @@ enum mtk_vcodec_dec_chip_name {
 	MTK_VDEC_MT8188 = 8188,
 	MTK_VDEC_MT8192 = 8192,
 	MTK_VDEC_MT8195 = 8195,
+	MTK_VDEC_MT6768 = 6768,
 };
 
 /*
@@ -107,7 +108,11 @@ struct vdec_pic_info {
  *
  * @is_subdev_supported: whether support parent-node architecture(subdev)
  * @uses_stateless_api: whether the decoder uses the stateless API with requests
+ * @uses_direct_mmio: whether the decoder programs registers from the kernel
+ * @direct_hw_cfg: hardware generation parameters for direct-MMIO decoding
  */
+struct vdec_direct_hw_cfg;
+
 struct mtk_vcodec_dec_pdata {
 	void (*init_vdec_params)(struct mtk_vcodec_dec_ctx *ctx);
 	int (*ctrls_setup)(struct mtk_vcodec_dec_ctx *ctx);
@@ -128,6 +133,8 @@ struct mtk_vcodec_dec_pdata {
 
 	bool is_subdev_supported;
 	bool uses_stateless_api;
+	bool uses_direct_mmio;
+	const struct vdec_direct_hw_cfg *direct_hw_cfg;
 };
 
 /**
