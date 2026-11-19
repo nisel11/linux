@@ -65,6 +65,25 @@
 /* Point data length */
 #define POINT_DATA_LEN 62
 
+struct ft8756_chip {
+	u16 id;
+	const char *input_name;
+	bool has_supplies;
+	bool fw_reload_on_resume;
+};
+
+static const struct ft8756_chip ft8756_chip_ft8756 = {
+	.id = 0x8756,
+	.input_name = "Focaltech FT8756 Touchscreen",
+	.has_supplies = true,
+	.fw_reload_on_resume = true,
+};
+
+static const struct ft8756_chip ft8756_chip_ft8057 = {
+	.id = 0x8057,
+	.input_name = "Focaltech FT8057 Touchscreen",
+};
+
 static struct drm_panel_follower_funcs ft8756_panel_follower_funcs;
 
 struct ft8756_abs_object {
@@ -83,6 +102,7 @@ struct ft8756_ts {
 	struct gpio_desc *irq_gpio;
 	int irq;
 	struct device *dev;
+	const struct ft8756_chip *chip;
 
 #define FT8756_STATUS_SUSPEND			BIT(0)
 #define FT8756_STATUS_DOWNLOAD_COMPLETE	BIT(1)
@@ -275,8 +295,8 @@ static int ft8756_check_chip_id(struct ft8756_ts *ts)
 
     ret = regmap_raw_read(ts->regmap, FT8756_CMD_READ_ID, &chip_id, 2);
     chip_id = cpu_to_be16(chip_id);
-    if (chip_id != 0x8756 || ret) {
-        dev_err(ts->dev, "Chip ID mismatch: expected 0x%x, got 0x%x", 0x8756, chip_id);
+    if (chip_id != ts->chip->id || ret) {
+        dev_err(ts->dev, "Chip ID mismatch: expected 0x%x, got 0x%x", ts->chip->id, chip_id);
         ret = -ENODEV;
         goto exit;
     }
@@ -305,7 +325,7 @@ static int ft8756_input_dev_config(struct ft8756_ts *ts)
 		return -ENOMEM;
 
 	/* Set input device properties */
-	ts->input->name = "Focaltech FT8756 Touchscreen";
+	ts->input->name = ts->chip->input_name;
 	ts->input->dev.parent = dev;
 
     /* Set absolute parameters for touch events */
@@ -438,7 +458,7 @@ static int ft8756_enter_boot(struct ft8756_ts *ts) {
     ft8756_reset(ts);
     mdelay(8);
 
-    ret = regmap_write(ts->regmap, FT8756_CMD_START1, 0x0);
+    ret = regmap_write(ts->regmap, FT8756_CMD_START1, FT8756_CMD_START2);
     if (ret)
         goto exit;
 
@@ -446,8 +466,8 @@ static int ft8756_enter_boot(struct ft8756_ts *ts) {
 
     ret = regmap_raw_read(ts->regmap, FT8756_CMD_READ_ID, &chip_id, 2);
     chip_id = cpu_to_be16(chip_id);
-    if (chip_id != 0x8756 || ret) {
-        dev_err(ts->dev, "Chip ID mismatch: expected 0x%x, got 0x%x", 0x8756, chip_id);
+    if (chip_id != ts->chip->id || ret) {
+        dev_err(ts->dev, "Chip ID mismatch: expected 0x%x, got 0x%x", ts->chip->id, chip_id);
         ret = -ENODEV;
         goto exit;
     }
@@ -571,6 +591,11 @@ static void _ft8756_download_firmware(struct ft8756_ts *ts) {
 	const struct firmware *fw_entry;
     int ret;
 
+    if (ts->fw_entry.data && !ts->chip->fw_reload_on_resume) {
+        ft8756_reset(ts);
+        return;
+    }
+
     if (ts->fw_entry.data)
 		goto upload;
 
@@ -643,12 +668,14 @@ upload:
         goto exit;
     }
 
+    msleep(10);
+
     ts->status |= FT8756_STATUS_DOWNLOAD_COMPLETE;
 	dev_info(ts->dev, "Touch IC FW loaded successfully");
     goto exit;
 
 release_fw:
-	kfree(ts->fw_entry.data);
+	devm_kfree(ts->dev, ts->fw_entry.data);
 	ts->fw_entry.data = NULL;
 	ts->fw_entry.size = 0;
 exit:
@@ -662,7 +689,7 @@ static void ft8756_download_firmware(struct work_struct *work) {
 	pm_runtime_disable(ts->dev);
 
 	/* Disable the touch screen IRQ to prevent further interrupts */
-	disable_irq_nosync(ts->irq);
+	disable_irq(ts->irq);
 
 	/* Cancel any pending delayed work */
 	cancel_delayed_work(&ts->work);
@@ -685,6 +712,7 @@ static int ft8756_spi_probe(struct spi_device *spi)
 	struct device *dev = &spi->dev;
 	struct regmap_config *regmap_config;
 	size_t max_size;
+	unsigned long irq_flags;
 	int ret = 0;
 
     dev_info(dev, "enter %s", __func__);
@@ -724,6 +752,7 @@ static int ft8756_spi_probe(struct spi_device *spi)
 
     ts->dev = dev;
     ts->irq = spi->irq;
+    ts->chip = spi_get_device_match_data(spi);
 
     /* Allocate memory for GPIO supplies */
 	ts->supplies = devm_kcalloc(dev, FT8756_NUM_SUPPLIES,
@@ -757,7 +786,7 @@ static int ft8756_spi_probe(struct spi_device *spi)
 	gpiod_set_consumer_name(ts->irq_gpio, "ft8756 irq");
 
     /* If the device follows a DRM panel, skip regulator initialization */
-	if (drm_is_panel_follower(dev))
+	if (drm_is_panel_follower(dev) || !ts->chip->has_supplies)
 		goto skip_regulators;
 
     ts->supplies[0].supply = "vio";
@@ -801,8 +830,12 @@ skip_regulators:
 	}
 
     /* Request threaded IRQ for touch screen interrupts */
+	irq_flags = irq_get_trigger_type(ts->irq);
+	if (!irq_flags)
+		irq_flags = IRQ_TYPE_EDGE_RISING;
+
 	ret = devm_request_threaded_irq(dev, ts->irq, NULL, ft8756_irq_handler,
-			 IRQ_TYPE_EDGE_RISING | IRQF_ONESHOT, dev_name(dev), ts);
+			 irq_flags | IRQF_ONESHOT, dev_name(dev), ts);
 	if (ret) {
         dev_err(dev, "request irq failed: %d\n", ret);
         return ret;
@@ -910,8 +943,16 @@ static struct drm_panel_follower_funcs ft8756_panel_follower_funcs = {
 	.panel_unpreparing = panel_unpreparing,
 };
 
+static const struct of_device_id ft8756_of_match[] = {
+	{ .compatible = "focaltech,ft8756", .data = &ft8756_chip_ft8756 },
+	{ .compatible = "focaltech,ft8057", .data = &ft8756_chip_ft8057 },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, ft8756_of_match);
+
 static const struct spi_device_id ft8756_spi_ids[] = {
-	{ "ft8756-spi", 0 },
+	{ "ft8756", (kernel_ulong_t)&ft8756_chip_ft8756 },
+	{ "ft8057", (kernel_ulong_t)&ft8756_chip_ft8057 },
 	{ },
 };
 MODULE_DEVICE_TABLE(spi, ft8756_spi_ids);
@@ -920,6 +961,7 @@ static struct spi_driver ft8756_spi_driver = {
 	.driver = {
 		.name   = "ft8756-spi",
 		.pm = pm_sleep_ptr(&ft8756_pm_ops),
+		.of_match_table = ft8756_of_match,
 	},
 	.probe = ft8756_spi_probe,
 	.id_table = ft8756_spi_ids,
